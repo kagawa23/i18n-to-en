@@ -257,6 +257,7 @@ jobs:
           git checkout -b $BRANCH_NAME
           git add i18n/i18n_en.properties
           git commit -m "Sync i18n_en.properties with changes from PR #$PR_NUMBER"
+          git remote set-url origin https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}
           git push origin $BRANCH_NAME
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
 
@@ -264,7 +265,7 @@ jobs:
         if: steps.sync.outcome == 'success' && steps.sync.exitcode == 0
         uses: peter-evans/create-pull-request@v5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PAT }}
           commit-message: "Sync i18n_en.properties with changes from PR #${{ env.PR_NUMBER }}"
           title: "Sync i18n_en.properties with changes from PR #${{ env.PR_NUMBER }}"
           body: |
