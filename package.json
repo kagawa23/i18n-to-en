@@ -1,0 +1,25 @@
+{
+  "name": "i18n-to-en",
+  "version": "1.0.0",
+  "description": "GitHub Action to sync i18n.properties changes to i18n_en.properties",
+  "main": "test-sync.js",
+  "scripts": {
+    "test": "node test-sync.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zczhaozc/i18n-to-en.git"
+  },
+  "keywords": [
+    "i18n",
+    "github-action",
+    "properties",
+    "sync"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "diff": "^5.1.0",
+    "simple-git": "^3.21.0"
+  }
+} 

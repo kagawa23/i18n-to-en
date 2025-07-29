@@ -1,0 +1,282 @@
+name: Sync i18n Properties Files
+
+on:
+  pull_request:
+    types: [closed]
+    paths:
+      - 'i18n/i18n.properties'
+
+jobs:
+  sync-i18n-files:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install simple-git diff
+
+      - name: Create sync-i18n script
+        run: |
+          cat > sync-i18n.js << 'EOL'
+          const fs = require('fs');
+          const path = require('path');
+          const { simpleGit } = require('simple-git');
+          const git = simpleGit();
+
+          async function main() {
+            try {
+              // Get the PR number from the GITHUB_REF
+              const prNumber = process.env.PR_NUMBER;
+              console.log(`Processing changes from PR #${prNumber}`);
+
+              // Get the merge commit SHA
+              const mergeCommitSha = process.env.GITHUB_SHA;
+              console.log(`Merge commit SHA: ${mergeCommitSha}`);
+
+              // Get the parent commits of the merge commit
+              const commitInfo = await git.raw(['cat-file', '-p', mergeCommitSha]);
+              const parentCommits = commitInfo
+                .split('\n')
+                .filter(line => line.startsWith('parent'))
+                .map(line => line.split(' ')[1]);
+
+              console.log(`Parent commits: ${parentCommits.join(', ')}`);
+
+              if (parentCommits.length < 2) {
+                console.log('Not a merge commit or unable to determine parent commits');
+                return;
+              }
+
+              // The first parent is the target branch, second parent is the source branch
+              const targetBranch = parentCommits[0];
+              const sourceBranch = parentCommits[1];
+
+              // Get changes to i18n.properties between the source and target branch
+              const diff = await git.diff([`${targetBranch}`, `${sourceBranch}`, '--', 'i18n/i18n.properties']);
+              
+              if (!diff) {
+                console.log('No changes detected in i18n.properties');
+                return;
+              }
+
+              // Read the current i18n files
+              const i18nPath = path.join(process.cwd(), 'i18n/i18n.properties');
+              const i18nEnPath = path.join(process.cwd(), 'i18n/i18n_en.properties');
+              
+              const i18nContent = fs.readFileSync(i18nPath, 'utf8');
+              const i18nEnContent = fs.readFileSync(i18nEnPath, 'utf8');
+
+              // Parse the properties files into key-value maps
+              const i18nMap = parsePropertiesFile(i18nContent);
+              const i18nEnMap = parsePropertiesFile(i18nEnContent);
+
+              // Process the diff to identify added, modified, or deleted keys
+              const changes = processDiff(diff);
+              console.log('Changes detected:', changes);
+
+              // Apply changes to i18n_en.properties
+              let updatedContent = i18nEnContent;
+              let hasChanges = false;
+
+              // Apply additions and modifications
+              for (const [key, value] of Object.entries(changes.added)) {
+                if (!i18nEnMap.has(key)) {
+                  console.log(`Adding new key: ${key}=${value}`);
+                  // If the key doesn't exist in the target file, add it at the end
+                  updatedContent = addKeyValueToProperties(updatedContent, key, value);
+                  hasChanges = true;
+                }
+              }
+
+              for (const [key, value] of Object.entries(changes.modified)) {
+                if (i18nEnMap.has(key)) {
+                  console.log(`Updating existing key: ${key}=${value}`);
+                  // If the key exists in the target file, update its value
+                  updatedContent = updateKeyValueInProperties(updatedContent, key, value);
+                  hasChanges = true;
+                }
+              }
+
+              // Apply deletions
+              for (const key of changes.deleted) {
+                if (i18nEnMap.has(key)) {
+                  console.log(`Removing key: ${key}`);
+                  // If the key exists in the target file, remove it
+                  updatedContent = removeKeyFromProperties(updatedContent, key);
+                  hasChanges = true;
+                }
+              }
+
+              if (hasChanges) {
+                // Write the updated content back to the file
+                fs.writeFileSync(i18nEnPath, updatedContent);
+                console.log('Successfully updated i18n_en.properties');
+                return true;
+              } else {
+                console.log('No changes needed in i18n_en.properties');
+                return false;
+              }
+            } catch (error) {
+              console.error('Error syncing i18n files:', error);
+              process.exit(1);
+            }
+          }
+
+          function parsePropertiesFile(content) {
+            const map = new Map();
+            const lines = content.split('\n');
+            
+            for (const line of lines) {
+              // Skip empty lines and comments
+              if (!line.trim() || line.trim().startsWith('#')) continue;
+              
+              // Handle lines with key-value pairs
+              const match = line.match(/^([^=]+)=(.*)$/);
+              if (match) {
+                const key = match[1].trim();
+                const value = match[2];
+                map.set(key, value);
+              }
+            }
+            
+            return map;
+          }
+
+          function processDiff(diff) {
+            const added = {};
+            const modified = {};
+            const deleted = [];
+            const keysToProcess = new Set();
+            
+            const lines = diff.split('\n');
+            
+            // First pass: collect all keys that appear in the diff
+            for (const line of lines) {
+              if ((line.startsWith('+') && !line.startsWith('+++')) || 
+                  (line.startsWith('-') && !line.startsWith('---'))) {
+                const match = line.substring(1).match(/^([^=]+)=(.*)$/);
+                if (match) {
+                  keysToProcess.add(match[1].trim());
+                }
+              }
+            }
+            
+            // Second pass: categorize the changes for each key
+            for (const key of keysToProcess) {
+              let oldValue = null;
+              let newValue = null;
+              
+              // Find old and new values for this key
+              for (const line of lines) {
+                if (line.startsWith('-') && !line.startsWith('---')) {
+                  const match = line.substring(1).match(/^([^=]+)=(.*)$/);
+                  if (match && match[1].trim() === key) {
+                    oldValue = match[2];
+                  }
+                } else if (line.startsWith('+') && !line.startsWith('+++')) {
+                  const match = line.substring(1).match(/^([^=]+)=(.*)$/);
+                  if (match && match[1].trim() === key) {
+                    newValue = match[2];
+                  }
+                }
+              }
+              
+              // Categorize the change
+              if (oldValue !== null && newValue !== null) {
+                // Key was modified
+                modified[key] = newValue;
+              } else if (oldValue !== null) {
+                // Key was deleted
+                deleted.push(key);
+              } else if (newValue !== null) {
+                // Key was added
+                added[key] = newValue;
+              }
+            }
+            
+            return { added, modified, deleted };
+          }
+
+          function addKeyValueToProperties(content, key, value) {
+            // Add the new key-value pair at the end of the file
+            return content.endsWith('\n') 
+              ? `${content}${key}=${value}\n` 
+              : `${content}\n${key}=${value}\n`;
+          }
+
+          function updateKeyValueInProperties(content, key, value) {
+            // Replace the existing key-value pair with the new value
+            const lines = content.split('\n');
+            const updatedLines = lines.map(line => {
+              if (line.trim().startsWith(`${key}=`)) {
+                return `${key}=${value}`;
+              }
+              return line;
+            });
+            
+            return updatedLines.join('\n');
+          }
+
+          function removeKeyFromProperties(content, key) {
+            // Remove the key-value pair from the file
+            const lines = content.split('\n');
+            const updatedLines = lines.filter(line => !line.trim().startsWith(`${key}=`));
+            
+            return updatedLines.join('\n');
+          }
+
+          // Execute the main function
+          main().then(hasChanges => {
+            process.exit(hasChanges ? 0 : 78); // Exit with special code if no changes
+          });
+          EOL
+
+      - name: Extract PR number
+        run: echo "PR_NUMBER=$(echo $GITHUB_REF | awk -F/ '{print $3}')" >> $GITHUB_ENV
+
+      - name: Run sync script
+        id: sync
+        continue-on-error: true
+        run: node sync-i18n.js
+
+      - name: Create branch for changes
+        if: steps.sync.outcome == 'success' && steps.sync.exitcode == 0
+        run: |
+          BRANCH_NAME="i18n-sync-from-pr-$PR_NUMBER"
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git checkout -b $BRANCH_NAME
+          git add i18n/i18n_en.properties
+          git commit -m "Sync i18n_en.properties with changes from PR #$PR_NUMBER"
+          git push origin $BRANCH_NAME
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+      - name: Create PR
+        if: steps.sync.outcome == 'success' && steps.sync.exitcode == 0
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Sync i18n_en.properties with changes from PR #${{ env.PR_NUMBER }}"
+          title: "Sync i18n_en.properties with changes from PR #${{ env.PR_NUMBER }}"
+          body: |
+            This PR syncs changes from i18n.properties to i18n_en.properties based on changes in PR #${{ env.PR_NUMBER }}.
+            
+            The following changes were applied:
+            - Added new keys
+            - Updated modified keys
+            - Removed deleted keys
+            
+            Original PR: #${{ env.PR_NUMBER }}
+          branch: ${{ env.BRANCH_NAME }}
+          base: ${{ github.event.pull_request.base.ref }}
+          reviewers: zczhaozc
+          delete-branch: true 
