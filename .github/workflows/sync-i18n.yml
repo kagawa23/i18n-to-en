@@ -18,8 +18,9 @@ jobs:
 
       - name: Debug GitHub context
         run: |
-          echo "GitHub context:"
-          echo "${{ toJSON(github) }}"
+          echo "GitHub context:" > github_context.json
+          echo '${{ toJSON(github) }}' >> github_context.json
+          cat github_context.json
           echo "Environment variables:"
           env | sort
           echo "Current directory files:"
