@@ -16,6 +16,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Debug GitHub context
+        run: |
+          echo "GitHub context:"
+          echo "${{ toJSON(github) }}"
+          echo "Environment variables:"
+          env | sort
+          echo "Current directory files:"
+          ls -la
+
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
@@ -241,7 +250,13 @@ jobs:
           EOL
 
       - name: Extract PR number
-        run: echo "PR_NUMBER=${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+        run: |
+          echo "GitHub ref: $GITHUB_REF"
+          echo "GitHub event name: $GITHUB_EVENT_NAME"
+          echo "GitHub event path: $GITHUB_EVENT_PATH"
+          echo "GitHub event PR number: $(cat $GITHUB_EVENT_PATH | jq '.pull_request.number')"
+          echo "PR_NUMBER=${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          echo "Extracted PR number: ${{ github.event.pull_request.number }}"
 
       - name: Run sync script
         id: sync
@@ -254,13 +269,28 @@ jobs:
           PAT: ${{ secrets.PAT }}
         run: |
           BRANCH_NAME="i18n-sync-from-pr-$PR_NUMBER"
-          echo "PAT=$PAT"
+          echo "Setting branch name: $BRANCH_NAME"
+          
           git config --global user.name "GitHub Actions Bot"
+          echo "Git config user.name result: $(git config --get user.name)"
+          
           git config --global user.email "actions@github.com"
+          echo "Git config user.email result: $(git config --get user.email)"
+          
           git checkout -b $BRANCH_NAME
+          echo "Git checkout result: $?"
+          
           git add i18n/i18n_en.properties
+          echo "Git add result: $?"
+          
           git commit -m "Sync i18n_en.properties with changes from PR #$PR_NUMBER"
+          echo "Git commit result: $?"
+          
+          echo "Attempting to push with token"
+          echo "Repository URL: https://***@github.com/${{ github.repository }}.git"
           git push "https://${PAT}@github.com/${{ github.repository }}.git" $BRANCH_NAME
+          echo "Git push result: $?"
+          
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
 
       - name: Create PR
