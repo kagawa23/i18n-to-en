@@ -287,8 +287,10 @@ jobs:
           echo "Git commit result: $?"
           
           echo "Attempting to push with token"
-          echo "Repository URL: https://***@github.com/${{ github.repository }}.git"
-          git push "https://${PAT}@github.com/${{ github.repository }}.git" $BRANCH_NAME
+          echo "Setting up remote with token exactly as it worked locally"
+          git remote set-url origin "https://kagawa23:${PAT}@github.com/${{ github.repository }}.git"
+          echo "Pushing changes"
+          git push origin $BRANCH_NAME
           echo "Git push result: $?"
           
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
